@@ -27,6 +27,28 @@ HS=""; TUN=""; VPN_DNS=auto
 fail() { echo "Not applied: $*"; exit 1; }
 is_on() { $IP rule | grep -q "^$PREF:"; }
 
+count_rules() {   # count_rules <table> <chain>: how many of our tagged rules are in a chain
+    $IPT -t "$1" -S "$2" 2>/dev/null | grep -c -e "--comment $TAG"
+}
+
+# OFF     = none of our rules exist
+# ON      = the routing rule, and per hotspot interface 2 forward rules + 1 masquerade, all exist
+# PARTIAL = anything else. Android rebuilds its own tetherctrl_* chains when the tethering upstream is
+#           re-evaluated, which drops our rules inside them while the routing rule and the DNAT survive.
+state() {
+    ipn=$($IP rule | grep -c "^$PREF:")
+    fwd=$(count_rules filter tetherctrl_FORWARD)
+    masq=$(count_rules nat tetherctrl_nat_POSTROUTING)
+    dnat=$(count_rules nat PREROUTING)
+    if [ "$ipn" -eq 0 ] && [ "$fwd" -eq 0 ] && [ "$masq" -eq 0 ] && [ "$dnat" -eq 0 ]; then
+        echo OFF
+    elif [ "$ipn" -ge 1 ] && [ "$fwd" -ge $((2 * ipn)) ] && [ "$masq" -ge "$ipn" ]; then
+        echo ON
+    else
+        echo PARTIAL
+    fi
+}
+
 detect_tun() {
     $IP route show table all 2>/dev/null | awk '$1=="default" && $2=="dev" && $4=="table" && $3 ~ /^(tun|wg|ppp|tap)/ {print $3; exit}'
 }
@@ -118,13 +140,31 @@ do_off() {
 }
 
 do_status() {
-    if is_on; then
-        echo "ON"
-        $IP rule | grep "^$PREF:"
-        $IPT -t nat -S PREROUTING 2>/dev/null | grep -e "--comment $TAG"
-    else
-        echo "OFF"
-    fi
+    st=$(state)
+    echo "$st"
+    [ "$st" = OFF ] && return 0
+    $IP rule | grep "^$PREF:"
+    echo "forward rules: $(count_rules filter tetherctrl_FORWARD), masquerade: $(count_rules nat tetherctrl_nat_POSTROUTING), dns redirect: $(count_rules nat PREROUTING)"
+    [ "$st" = PARTIAL ] && echo "PARTIAL: the system rebuilt its tethering rules and dropped some of ours. Tap Action (or run toggle / on) to re-apply."
+    return 0
+}
+
+# toggle: ON -> off; OFF -> on; PARTIAL -> re-apply (and if that is impossible, clean up what is left)
+do_toggle() {
+    case $(state) in
+        ON) do_off ;;
+        PARTIAL)
+            echo "Some rules were lost (the system rebuilt its tethering rules). Re-applying."
+            ( do_on )
+            rc=$?
+            if [ $rc -ne 0 ]; then
+                remove_rules
+                echo "Leftover rules removed: state is OFF."
+                exit $rc
+            fi
+            ;;
+        *) do_on ;;
+    esac
 }
 
 do_detect() {
@@ -142,7 +182,7 @@ do_detect() {
 case "${1:-toggle}" in
     on) do_on ;;
     off) do_off ;;
-    toggle) if is_on; then do_off; else do_on; fi ;;
+    toggle) do_toggle ;;
     status) do_status ;;
     detect) do_detect ;;
     *) echo "usage: sh vpn-tether.sh on|off|toggle|status|detect"; exit 2 ;;

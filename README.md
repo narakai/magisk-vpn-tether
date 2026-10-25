@@ -48,6 +48,13 @@ Tap Action again to turn it off.
 
 Turn the hotspot on **after** the VPN, and tap Action again after you toggle the hotspot or the VPN reconnects.
 
+**If the hotspot clients suddenly lose internet** while this is on: Android sometimes rebuilds its own tethering firewall
+chains while the hotspot is running (for example when it re-evaluates the upstream network). That drops the forward and
+masquerade rules of this module, while the routing rule stays, so the client's packets are sent into the VPN and then dropped.
+Tap **Action** once: since v1.0.1 the script detects this half-applied state (`status` prints `PARTIAL`) and re-applies instead of
+switching off. If it cannot re-apply (for example the hotspot is gone) it removes the leftovers. There is deliberately no background
+watcher, so you have to tap.
+
 Without the Magisk UI: `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh on|off|toggle|status"`.
 To see what would be auto-detected (VPN interface and table, VPN DNS, hotspot interface and subnet): `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh detect"`.
 
@@ -76,6 +83,9 @@ NekoBox (sing-box) VPN, uplink Wi-Fi, an iPhone as the hotspot client.
   (checked with an earlier revision of the same rules).
 - `on`, repeated `on`, `off`, `toggle`, `status`, the missing-VPN / missing-hotspot / bad-config error paths and `VPN_DNS=off`
   were exercised on the phone, in Magisk's busybox standalone shell, with the final script.
+- The half-applied state was reproduced by deleting this module's rules from the tether chains: `status` reports `PARTIAL`,
+  `toggle` re-applies, and with no usable hotspot interface it cleans up. That loss also happened once for real on the test phone;
+  I did not capture the exact moment, I only saw the rules gone shortly after a tethering upstream re-evaluation in the system log.
 
 Not verified: other devices / ROMs / Android versions, other VPN clients, USB or Bluetooth tethering, IPv6 clients
 (the VPN table normally has no IPv6 default, so IPv6 should fall back to IPv4, but I did not test it), the interplay
@@ -84,7 +94,7 @@ Auto-detection of the hotspot interface assumes the system's tethering rule uses
 
 ## Safety
 
-- Needs root and edits firewall and routing rules. Read `module/vpn-tether.sh` first (about 149 lines).
+- Needs root and edits firewall and routing rules. Read `module/vpn-tether.sh` first (about 189 lines).
 - Anyone connected to your hotspot gets to use your VPN. Use a hotspot password.
 - Some VPN providers do not allow sharing a connection with other devices: check yours.
 - No warranty.
