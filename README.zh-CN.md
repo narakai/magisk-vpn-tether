@@ -49,6 +49,9 @@ Action 开关下面这些规则（都只在内存里）：
 不用 Magisk 界面：`su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh on|off|toggle|status"`。
 想看自动识别到了什么（VPN 接口和路由表、VPN 的 DNS、热点接口和网段）：`su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh detect"`。
 
+**重启 VPN 之后，请让热点设备重新连接热点**（关开 Wi-Fi，或开关飞行模式）。
+如果 VPN 用的是 *fake-ip* DNS（很多 sing-box / NekoBox 配置的默认做法：DNS 回答来自 `198.18.0.0/15`，TTL 约 10 分钟），VPN 重启时 fake-ip 映射表会被重置，但设备的 DNS 缓存里还留着旧的回答，于是连接去往已经失效的地址，网页打不开。重连（或等缓存过期）就能恢复，规则本身没有问题。在测试手机上遇到过：关 VPN、关 Action、开 VPN、开 Action 之后，iPhone 一直打不开网页，重连 Wi-Fi 后恢复。
+
 ## 配置
 
 默认值在 `config.sh`。要改请写到 **`/data/adb/vpn-tether.conf`**（模块更新不会丢）：

@@ -58,6 +58,13 @@ watcher, so you have to tap.
 Without the Magisk UI: `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh on|off|toggle|status"`.
 To see what would be auto-detected (VPN interface and table, VPN DNS, hotspot interface and subnet): `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh detect"`.
 
+**After you restart the VPN, make the hotspot clients reconnect to the hotspot** (turn their Wi-Fi off and on, or airplane mode on/off).
+If the VPN uses *fake-IP* DNS (the default in many sing-box / NekoBox setups: DNS answers come from `198.18.0.0/15` with a TTL of
+about 10 minutes), the fake-IP table is reset when the VPN restarts, but the client keeps the old answers in its DNS cache, so its
+connections go to addresses that no longer map to anything and pages do not open. Reconnecting (or waiting for the cache to expire)
+fixes it; the rules themselves are fine. Seen on the test phone: after VPN off, Action off, VPN on, Action on, the iPhone could not
+load pages until its Wi-Fi was reconnected.
+
 ## Configuration
 
 Defaults are in `config.sh`. To change them put overrides in **`/data/adb/vpn-tether.conf`** (survives module updates):
