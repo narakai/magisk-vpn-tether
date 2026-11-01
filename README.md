@@ -25,8 +25,10 @@ On top of that, the hotspot's DNS is served by the tether `dnsmasq`, which forwa
 3. `MASQUERADE` the hotspot subnet out of the VPN interface
 4. `DNAT` the clients' port-53 traffic to the VPN's DNS
 
-Nothing runs at boot, there is no service. The rules disappear when the hotspot is toggled or the phone reboots.
-Tap Action again to turn it off.
+Since v1.1.0 a small background **watcher** keeps them applied: after you tapped Action once, it checks every few seconds and
+re-applies the rules when Android drops them (hotspot toggled, VPN reconnected, tethering rebuilt), and removes them when the hotspot
+is gone. Tap Action again to turn it off (then the watcher stops re-applying). With `AUTO=0` nothing runs in the background and the
+rules are in memory only, as in v1.0.x.
 
 ## Requirements
 
@@ -46,16 +48,19 @@ Tap Action again to turn it off.
 3. Magisk -> Modules -> *VPN Tether* -> **Action**. The output tells you what was applied, or what is missing.
 4. Connect the client. Tap **Action** again to turn it off.
 
-Turn the hotspot on **after** the VPN, and tap Action again after you toggle the hotspot or the VPN reconnects.
+Turn the hotspot on **after** the VPN. After that you do not have to tap Action again: the watcher re-applies the rules when you toggle
+the hotspot or the VPN reconnects (within `INTERVAL` seconds, default 5; the first tap is still needed after a fresh install, because
+sharing your VPN is something you turn on on purpose). The "on" flag is `/data/adb/vpn-tether.on` and survives a reboot; what the watcher
+did is logged in `/data/adb/vpn-tether.log`. Tap Action while it is ON to turn sharing off for good.
 
-**If the hotspot clients suddenly lose internet** while this is on: Android sometimes rebuilds its own tethering firewall
+**If the hotspot clients suddenly lose internet** while this is on (with `AUTO=0`, or before the watcher has caught up): Android sometimes rebuilds its own tethering firewall
 chains while the hotspot is running (for example when it re-evaluates the upstream network). That drops the forward and
 masquerade rules of this module, while the routing rule stays, so the client's packets are sent into the VPN and then dropped.
 Tap **Action** once: since v1.0.1 the script detects this half-applied state (`status` prints `PARTIAL`) and re-applies instead of
-switching off. If it cannot re-apply (for example the hotspot is gone) it removes the leftovers. There is deliberately no background
-watcher, so you have to tap.
+switching off. If it cannot re-apply (for example the hotspot is gone) it removes the leftovers. With the watcher (default since v1.1.0) you do not
+have to tap.
 
-Without the Magisk UI: `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh on|off|toggle|status"`.
+Without the Magisk UI: `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh on|off|toggle|status"` (`watch` runs the watcher in the foreground).
 To see what would be auto-detected (VPN interface and table, VPN DNS, hotspot interface and subnet): `su -c "sh /data/adb/modules/vpn_tether/vpn-tether.sh detect"`.
 
 **After you restart the VPN, make the hotspot clients reconnect to the hotspot** (turn their Wi-Fi off and on, or airplane mode on/off).
@@ -73,6 +78,8 @@ Defaults are in `config.sh`. To change them put overrides in **`/data/adb/vpn-te
 HS="wlan1"        # hotspot interface(s), space separated. Empty = auto-detect from the tethering rule
 TUN="tun0"        # VPN interface. Empty = auto-detect (tun*/wg*/ppp*/tap* with a default route)
 VPN_DNS="auto"    # auto | off | a.b.c.d
+AUTO=1            # 1 = background watcher keeps the rules applied, 0 = no background process
+INTERVAL=5        # seconds between two watcher checks
 ```
 
 `VPN_DNS=auto` assumes a sing-box-style tun address `x.x.x.1/30` and uses `x.x.x.2` as the DNS (that is where
@@ -94,6 +101,10 @@ NekoBox (sing-box) VPN, uplink Wi-Fi, an iPhone as the hotspot client.
   `toggle` re-applies, and with no usable hotspot interface it cleans up. That loss also happened once for real on the test phone;
   I did not capture the exact moment, I only saw the rules gone shortly after a tethering upstream re-evaluation in the system log.
 
+The watcher (v1.1.0) was tested on the same phone: deleting the module's forward and masquerade rules made it re-apply within 2 seconds
+(`INTERVAL=2` in that test), `off` was not undone by it, and a second `on` did not start a second watcher. Not tested: a real hotspot toggle
+while it runs, and a reboot (the `service.sh` start).
+
 Not verified: other devices / ROMs / Android versions, other VPN clients, USB or Bluetooth tethering, IPv6 clients
 (the VPN table normally has no IPv6 default, so IPv6 should fall back to IPv4, but I did not test it), the interplay
 with Android's BPF tethering offload on other kernels.
@@ -101,14 +112,16 @@ Auto-detection of the hotspot interface assumes the system's tethering rule uses
 
 ## Safety
 
-- Needs root and edits firewall and routing rules. Read `module/vpn-tether.sh` first (about 189 lines).
+- Needs root and edits firewall and routing rules. Read `module/vpn-tether.sh` first (about 250 lines).
+- With the watcher, once you turned sharing on, **every hotspot you open later also gets your VPN** until you tap Action to turn it off.
+  Set `AUTO=0` if you do not want that.
 - Anyone connected to your hotspot gets to use your VPN. Use a hotspot password.
 - Some VPN providers do not allow sharing a connection with other devices: check yours.
 - No warranty.
 
 ## Remove
 
-Disable or remove the module in Magisk. To clear the rules at once: Action again, or turn the hotspot off.
+Disable or remove the module in Magisk. To clear the rules at once: Action again (this also stops the watcher from re-applying).
 
 ## Build from source
 

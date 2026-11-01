@@ -1,6 +1,6 @@
 id=vpn_tether
 name=VPN Tether (hotspot via VPN)
-version=v1.0.1
-versionCode=101
+version=v1.1.0
+versionCode=110
 author=narakai
-description=Tap Action to share the phone's VPN with its hotspot clients (DNS included). In-memory rules only, nothing runs at boot.
+description=Tap Action once to share the phone's VPN with its hotspot clients (DNS included). A small watcher keeps the rules applied (set AUTO=0 to disable).

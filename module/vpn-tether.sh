@@ -1,10 +1,10 @@
 #!/system/bin/sh
 # vpn-tether.sh - share the phone's VPN with its hotspot clients.
 #
-# Usage (as root):  sh vpn-tether.sh on | off | toggle | status | detect
+# Usage (as root):  sh vpn-tether.sh on | off | toggle | status | detect | watch
 #
 # Android normally sends hotspot traffic out of the uplink (Wi-Fi / mobile data), never into the
-# VPN. This adds, in memory only (gone after a hotspot toggle or reboot):
+# VPN. This adds, in memory only (Android or a reboot can drop them; `watch` re-applies them):
 #   1. an ip rule: packets arriving from the hotspot interface use the VPN's routing table
 #   2. iptables FORWARD accepts hotspot <-> VPN, and MASQUERADE out of the VPN interface
 #   3. a DNAT of the clients' port-53 traffic to the VPN's DNS (otherwise the tether dnsmasq
@@ -20,9 +20,13 @@ PREF=20500          # our ip rule priority; must be lower than the tethering rul
 TETHER_PREF=21000
 
 case $0 in */*) MODDIR=${0%/*} ;; *) MODDIR=. ;; esac
-HS=""; TUN=""; VPN_DNS=auto
+HS=""; TUN=""; VPN_DNS=auto; AUTO=1; INTERVAL=5
 [ -f "$MODDIR/config.sh" ] && . "$MODDIR/config.sh"
 [ -f /data/adb/vpn-tether.conf ] && . /data/adb/vpn-tether.conf
+
+WANT=/data/adb/vpn-tether.on     # exists = sharing was turned on and the watcher keeps it applied
+LOG=/data/adb/vpn-tether.log
+WPID=/dev/vpn-tether.pid         # tmpfs: gone on reboot, like the watcher
 
 fail() { echo "Not applied: $*"; exit 1; }
 is_on() { $IP rule | grep -q "^$PREF:"; }
@@ -132,9 +136,12 @@ do_on() {
         echo "WARNING: DNS is not redirected (VPN_DNS=$VPN_DNS, none derived): hotspot clients' DNS goes through the uplink and can leak."
     fi
     is_on || fail "the routing rule is not present after adding it."
+    touch "$WANT"
+    ensure_watcher
 }
 
 do_off() {
+    rm -f "$WANT"
     remove_rules
     echo "OFF: hotspot clients are no longer routed through the VPN."
 }
@@ -167,6 +174,58 @@ do_toggle() {
     esac
 }
 
+log() {   # keep the last 100 lines
+    echo "$(date '+%F %T') $*" >> "$LOG"
+    [ "$(wc -l < "$LOG")" -gt 200 ] && { tail -n 100 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"; }
+}
+
+# One watcher pass. Only acts while $WANT exists, i.e. between an `on` and an `off`.
+#   hotspot gone                   -> remove the leftovers (the flag stays, so the next hotspot is handled)
+#   VPN gone                       -> leave things alone
+#   OFF / PARTIAL / wrong VPN table / hotspot interface count changed -> re-apply
+watch_once() {
+    [ -f "$WANT" ] || return 0
+    st=$(state)
+    hsl=${HS:-$(detect_hs)}
+    if [ -z "$hsl" ]; then
+        [ "$st" = OFF ] || { remove_rules; log "hotspot is gone: removed leftover rules"; }
+        return 0
+    fi
+    tun=${TUN:-$(detect_tun)}
+    [ -n "$tun" ] || return 0
+    want_tbl=$(tun_table "$tun")
+    [ -n "$want_tbl" ] || return 0
+    cur_tbl=$($IP rule | awk -v p="$PREF:" '$1==p {print $NF; exit}')
+    ipn=$($IP rule | grep -c "^$PREF:")
+    n=$(echo $hsl | wc -w)
+    if [ "$st" != ON ] || [ "$cur_tbl" != "$want_tbl" ] || [ "$ipn" -ne "$n" ]; then
+        if ( do_on ) >/dev/null 2>&1; then
+            log "re-applied (was $st, table ${cur_tbl:-none} -> $want_tbl, hotspot: $hsl)"
+        fi
+    fi
+}
+
+do_watch() {
+    [ "$AUTO" = 1 ] || { echo "AUTO=$AUTO: watcher disabled"; return 0; }
+    if [ -f "$WPID" ] && kill -0 "$(cat "$WPID")" 2>/dev/null; then
+        echo "watcher already running (pid $(cat "$WPID"))"
+        return 0
+    fi
+    echo $$ > "$WPID"
+    while :; do
+        watch_once
+        sleep "$INTERVAL"
+    done
+}
+
+# Start the watcher in the background unless AUTO=0 or it already runs. Fully detached so that the
+# Magisk Action screen does not wait for it.
+ensure_watcher() {
+    [ "$AUTO" = 1 ] || return 0
+    if [ -f "$WPID" ] && kill -0 "$(cat "$WPID")" 2>/dev/null; then return 0; fi
+    nohup sh "$0" watch >/dev/null 2>&1 </dev/null &
+}
+
 do_detect() {
     t=${TUN:-$(detect_tun)}
     echo "VPN interface   : ${t:-<none found>}"
@@ -185,5 +244,6 @@ case "${1:-toggle}" in
     toggle) do_toggle ;;
     status) do_status ;;
     detect) do_detect ;;
-    *) echo "usage: sh vpn-tether.sh on|off|toggle|status|detect"; exit 2 ;;
+    watch) do_watch ;;
+    *) echo "usage: sh vpn-tether.sh on|off|toggle|status|detect|watch"; exit 2 ;;
 esac

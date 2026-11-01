@@ -14,3 +14,11 @@ TUN=""
 #   off        = do not touch DNS (clients' DNS will then leave through the uplink: a DNS leak).
 #   a.b.c.d    = use this IPv4 address, reachable through the VPN.
 VPN_DNS=auto
+
+# Keep the sharing applied after you turned it on once (Action). 1 = a small background watcher re-applies
+# the rules when Android drops them (hotspot toggled, VPN reconnected, tethering rebuilt) and removes them
+# when the hotspot is gone. 0 = never run anything in the background: tap Action yourself each time.
+AUTO=1
+
+# Seconds between two checks of the watcher.
+INTERVAL=5
